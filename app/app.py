@@ -8,12 +8,15 @@ from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
-from sklearn.naive_bayes import MultinomialNB
+from sklearn.svm import LinearSVC
 
 # Resolve important paths
 app_dir = os.path.dirname(__file__)
 model_path = os.path.join(app_dir, "model.pkl")
 data_path = os.path.abspath(os.path.join(app_dir, "..", "data", "spam.csv", "SMSSpamCollection"))
+
+# Bump this when changing model/vectorizer behavior
+MODEL_VERSION = 2
 
 
 def ensure_nltk(resource: str) -> None:
@@ -56,7 +59,13 @@ def train_and_save_model() -> tuple:
     clean_text, _, _ = clean_text_factory()
     df['cleaned'] = df['message'].apply(clean_text)
 
-    tfidf = TfidfVectorizer(max_features=3000)
+    # Use word unigrams + bigrams and sublinear TF to better capture promotional phrases
+    tfidf = TfidfVectorizer(
+        max_features=20000,
+        ngram_range=(1, 2),
+        sublinear_tf=True,
+        min_df=2
+    )
     X = tfidf.fit_transform(df['cleaned'])
     y = df['label'].map({'ham': 0, 'spam': 1}).astype(int)
 
@@ -64,12 +73,17 @@ def train_and_save_model() -> tuple:
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    model = MultinomialNB()
+    # LinearSVC is a strong baseline for sparse text; balance classes
+    model = LinearSVC(class_weight="balanced", random_state=42)
     model.fit(X_train, y_train)
 
-    # Persist
+    # Persist along with a simple version stamp
     with open(model_path, 'wb') as f:
-        pickle.dump((model, tfidf), f)
+        pickle.dump({
+            'version': MODEL_VERSION,
+            'model': model,
+            'tfidf': tfidf,
+        }, f)
 
     return model, tfidf
 
@@ -78,9 +92,11 @@ def load_or_build_model() -> tuple:
     if os.path.exists(model_path):
         try:
             with open(model_path, "rb") as f:
-                return pickle.load(f)
+                payload = pickle.load(f)
+                if isinstance(payload, dict) and payload.get('version') == MODEL_VERSION:
+                    return payload['model'], payload['tfidf']
         except Exception:
-            # Corrupted/empty; rebuild
+            # Corrupted/old; rebuild below
             pass
     # Build if missing or failed to load
     st.info("Preparing model... (first run may take ~30s)")
