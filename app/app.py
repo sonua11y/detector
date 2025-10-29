@@ -19,6 +19,29 @@ data_path = os.path.abspath(os.path.join(app_dir, "..", "data", "spam.csv", "SMS
 MODEL_VERSION = 3
 
 
+def is_promotional_spam(raw_text: str) -> bool:
+    """Simple rule-based detector for overt promotional spam.
+
+    This complements the ML model for phrases underrepresented in the dataset.
+    """
+    text = raw_text.lower()
+    promo_patterns = [
+        r"\bget\s+rich\b",
+        r"\bearn\s+\d+(,\d+)*(\.\d+)?\s*(rs|inr|₹|usd|dollars|per\s+day)\b",
+        r"\blimited\s+time\s+offer\b",
+        r"\bbuy\s*1\s*get\s*\d+\b",
+        r"\bfree\s+(gift|offer|bonus|membership|trial)\b",
+        r"\bsign\s*up\s*now\b",
+        r"\bclick\s+(here|to|now)\b",
+        r"\bwork\s+from\s+home\b",
+        r"\bguarantee(d)?\s+(income|money|profit)\b",
+    ]
+    for pattern in promo_patterns:
+        if re.search(pattern, text):
+            return True
+    return False
+
+
 def ensure_nltk(resource: str) -> None:
     try:
         nltk.data.find(resource)
@@ -118,10 +141,14 @@ if st.button("Predict"):
     if input_text.strip() == "":
         st.warning("Please enter some text to analyze.")
     else:
-        # Clean and transform input text (same preprocessing as training)
-        cleaned_input = clean_text(input_text)
-        transformed = tfidf.transform([cleaned_input])
-        prediction = model.predict(transformed)[0]
+        # Rule-based short-circuit for overt promotional spam
+        if is_promotional_spam(input_text):
+            prediction = 1
+        else:
+            # Clean and transform input text (same preprocessing as training)
+            cleaned_input = clean_text(input_text)
+            transformed = tfidf.transform([cleaned_input])
+            prediction = model.predict(transformed)[0]
 
         if prediction == 1:
             st.error("🚨 This looks like SPAM!")
