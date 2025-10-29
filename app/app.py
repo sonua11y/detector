@@ -16,7 +16,7 @@ model_path = os.path.join(app_dir, "model.pkl")
 data_path = os.path.abspath(os.path.join(app_dir, "..", "data", "spam.csv", "SMSSpamCollection"))
 
 # Bump this when changing model/vectorizer behavior
-MODEL_VERSION = 2
+MODEL_VERSION = 3
 
 
 def ensure_nltk(resource: str) -> None:
@@ -60,11 +60,13 @@ def train_and_save_model() -> tuple:
     df['cleaned'] = df['message'].apply(clean_text)
 
     # Use word unigrams + bigrams and sublinear TF to better capture promotional phrases
+    # Lower min_df to catch rare promotional phrases, increase features for better coverage
     tfidf = TfidfVectorizer(
-        max_features=20000,
+        max_features=30000,
         ngram_range=(1, 2),
         sublinear_tf=True,
-        min_df=2
+        min_df=1,
+        max_df=0.95
     )
     X = tfidf.fit_transform(df['cleaned'])
     y = df['label'].map({'ham': 0, 'spam': 1}).astype(int)
@@ -104,6 +106,7 @@ def load_or_build_model() -> tuple:
 
 
 model, tfidf = load_or_build_model()
+clean_text, _, _ = clean_text_factory()
 
 st.title("📧 Spam Email Detector")
 st.write("This app detects whether a given message or email is Spam or Not Spam.")
@@ -115,8 +118,9 @@ if st.button("Predict"):
     if input_text.strip() == "":
         st.warning("Please enter some text to analyze.")
     else:
-        # Transform input text
-        transformed = tfidf.transform([input_text])
+        # Clean and transform input text (same preprocessing as training)
+        cleaned_input = clean_text(input_text)
+        transformed = tfidf.transform([cleaned_input])
         prediction = model.predict(transformed)[0]
 
         if prediction == 1:
